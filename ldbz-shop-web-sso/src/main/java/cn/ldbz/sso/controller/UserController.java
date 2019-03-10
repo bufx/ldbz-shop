@@ -6,6 +6,8 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.commons.lang3.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -16,11 +18,14 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseBody;
 
 import com.alibaba.dubbo.config.annotation.Reference;
+import com.ctrip.framework.apollo.model.ConfigChange;
+import com.ctrip.framework.apollo.model.ConfigChangeEvent;
+import com.ctrip.framework.apollo.spring.annotation.ApolloConfigChangeListener;
 
 import cn.ldbz.constant.Const;
 import cn.ldbz.notify.service.NotifyUserService;
 import cn.ldbz.pojo.LdbzResult;
-import cn.ldbz.pojo.TbUser;
+import cn.ldbz.pojo.LdbzUser;
 import cn.ldbz.sso.service.UserService;
 import cn.ldbz.utils.CookieUtils;
 
@@ -28,7 +33,10 @@ import cn.ldbz.utils.CookieUtils;
  * 用户登录注册 Controller
  */
 @Controller
+@RequestMapping("sso")
 public class UserController {
+	
+	private static final Logger logger = LoggerFactory.getLogger(UserController.class);
 
     @Reference(version = Const.LDBZ_SHOP_SSO_VERSION, timeout=30000)
     private UserService userService;
@@ -38,6 +46,27 @@ public class UserController {
 
     @Value("${portal_path}")
     private String PORTAL_PATH;
+    //图片的URL路径
+    @Value("${redisKey.nginxImage.url.key}")
+    private String INDEX_NGINX_IMAGE_URL;
+    
+    /**
+     * 监听配置项是否有修改
+     */
+    @ApolloConfigChangeListener
+	public void onChange(ConfigChangeEvent changeEvent) {
+		for (String key : changeEvent.changedKeys()) {
+			ConfigChange change = changeEvent.getChange(key);
+			logger.debug("Found change - key: {}, oldValue: {}, newValue: {}, changeType: {}",
+					change.getPropertyName(), change.getOldValue(), change.getNewValue(), change.getChangeType());
+			switch(key) {
+				case "portal_path" : 
+					PORTAL_PATH = change.getNewValue();
+				case "redisKey.nginxImage.url.key" : 
+					INDEX_NGINX_IMAGE_URL = change.getNewValue();
+			}
+		}
+	}
 
     /**
      * 显示注册页面
@@ -46,8 +75,18 @@ public class UserController {
      * @return
      */
     @RequestMapping(value = "/register",method = RequestMethod.GET)
-    public String showRegister(Model model, String returnUrl) {
+    public String showRegister(HttpServletRequest request, Model model, String returnUrl) {
+
+        String token = CookieUtils.getCookieValue(request, Const.TOKEN_LOGIN);
+        if(StringUtils.isNoneEmpty(token)) {
+        	if(userService.token(token)!=null) {
+        		//已经在线
+        		return "redirect:" + PORTAL_PATH;
+        	}
+        }
+        //尚未登录
         model.addAttribute("uid", UUID.randomUUID().toString());
+    	model.addAttribute("nginxImage", INDEX_NGINX_IMAGE_URL);
         return "register";
     }
 
@@ -58,8 +97,18 @@ public class UserController {
      * @return
      */
     @RequestMapping(value = "/login",method = RequestMethod.GET)
-    public String showLogin(Model model, String returnUrl) {
+    public String showLogin(HttpServletRequest request, Model model, String returnUrl) {
+
+        String token = CookieUtils.getCookieValue(request, Const.TOKEN_LOGIN);
+        if(StringUtils.isNoneEmpty(token)) {
+        	if(userService.token(token)!=null) {
+        		//已经在线
+        		return "redirect:" + PORTAL_PATH;
+        	}
+        }
+        //尚未登录
         model.addAttribute("returnUrl", returnUrl);
+    	model.addAttribute("nginxImage", INDEX_NGINX_IMAGE_URL);
         return "login";
     }
 
@@ -73,7 +122,7 @@ public class UserController {
      */
     @ResponseBody
     @RequestMapping(value = "/user/login", method = RequestMethod.POST)
-    public String login(TbUser user, String returnUrl, HttpServletResponse response, HttpServletRequest request) {
+    public String login(LdbzUser user, String returnUrl, HttpServletResponse response, HttpServletRequest request) {
         LdbzResult result = userService.login(user);
         if (result.getStatus() == 200) {
             CookieUtils.setCookie(request, response, Const.TOKEN_LOGIN, result.getData().toString());
@@ -92,8 +141,8 @@ public class UserController {
         return "{\"success\":false , \"info\":\"用户名密码有误\"}";
     }
 
-    @RequestMapping(value = "/loginservice")
     @ResponseBody
+    @RequestMapping(value = "/loginservice")
     public String valida(String callback, String method, Integer uid) {
         return callback + "({\"Identity\":{\"Unick\":\"\",\"Name\":\"\",\"IsAuthenticated\":false}})";
     }
@@ -105,9 +154,10 @@ public class UserController {
      * @param email 邮箱
      * @return
      */
-    @RequestMapping("/validateuser/{isEngaged}")
     @ResponseBody
-    public String validateUser(@PathVariable String isEngaged, @RequestParam(defaultValue = "") String regName, @RequestParam(defaultValue = "") String email) {
+    @RequestMapping("/validateuser/{isEngaged}")
+    public String validateUser(@PathVariable String isEngaged, @RequestParam(defaultValue = "") String regName, 
+    		@RequestParam(defaultValue = "") String email) {
         return userService.validateUser(isEngaged, regName, email);
     }
 
@@ -116,8 +166,8 @@ public class UserController {
      * @param email 邮箱
      * @return
      */
-    @RequestMapping("/notifyuser/emailCode")
     @ResponseBody
+    @RequestMapping("/notifyuser/emailCode")
     public String emailCode(String email) {
         return notifyUserService.emailNotify(email);
     }
@@ -135,10 +185,24 @@ public class UserController {
      * @param uuid          Redis验证码uuid
      * @return
      */
-    @RequestMapping("/registerByEmail")
     @ResponseBody
+    @RequestMapping("/registerByEmail")
     public String sendRegEmail(String regName, String pwdRepeat, String pwd, String emailCode, String uuid, String authCode, String email) {
         return userService.register(regName, pwd, pwdRepeat, emailCode, uuid, authCode, email);
+    }
+    
+    /**
+     * 用户注销
+     * @param request
+     * @param response
+     * @return
+     */
+    @RequestMapping("/logout")
+    public String logout(HttpServletRequest request, HttpServletResponse response) {
+    	String token = CookieUtils.getCookieValue(request, Const.TOKEN_LOGIN);
+    	userService.logout(token, null);
+    	CookieUtils.setCookie(request, response, Const.TOKEN_LOGIN, "", -1);
+        return "redirect:" + PORTAL_PATH;
     }
 
 }

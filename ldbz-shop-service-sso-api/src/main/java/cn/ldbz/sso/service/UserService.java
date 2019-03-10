@@ -1,7 +1,7 @@
 package cn.ldbz.sso.service;
 
 import cn.ldbz.pojo.LdbzResult;
-import cn.ldbz.pojo.TbUser;
+import cn.ldbz.pojo.LdbzUser;
 
 /**
  * 用户登录相关服务
@@ -19,22 +19,15 @@ public interface UserService {
      *           data: "fe5cb546aeb3ce1bf37abcb08a40493e" //登录成功，返回token
      *         }
      */
-    LdbzResult login(TbUser user);
+    LdbzResult login(LdbzUser user);
 
     /**
      * 请求格式 GET
      * 根据token值获取用户信息(判断当前用户是否存在)
      *
      * @param token token值
-     * @param callback 可选参数 有参表示jsonp调用
-     * @return {
-     *           status: 200 //200 成功 400 没有此token 500 系统异常
-     *           msg: "OK" //错误 没有此token.
-     *           data: {"username":"laodaobazi"} //返回用户名
-     *         }
      */
-
-    LdbzResult token(String token, String callback);
+    LdbzUser token(String token);
 
     /**
      * 请求格式 GET

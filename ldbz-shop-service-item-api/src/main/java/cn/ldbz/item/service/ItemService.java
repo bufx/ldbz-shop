@@ -35,6 +35,14 @@ public interface ItemService {
 	 * @return
 	 */
 	String getItemImageByRedis(Object itemCode , Object type);
+	
 	String getItemImage(Object itemCode , Object type);
-
+	
+	/**
+	 * 根据商品编号实时获取价格
+	 * @param itemCode
+	 * @return
+	 */
+	float getItemPriceByCode(long itemCode);
+	
 }
